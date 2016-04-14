@@ -16,13 +16,14 @@ def myfloat(value, prec=2):
     return round(float(value), prec)
 
 class NestControl(Node):
-    
+
     def __init__(self, *args, **kwargs):
         super(NestControl, self).__init__(*args, **kwargs)
-    
+
     def _discover(self, **kwargs):
         try:
             manifest = self.parent.config.get('manifest', {})
+	    self.parent.poly.LOGGER.info('=============================================================')
             self.parent.poly.LOGGER.info("Discovering Nest Products...")
             self.parent.poly.LOGGER.info("User: %s", USERNAME)
             self.napi = nest.Nest(USERNAME,PASSWORD, local_time=True)
@@ -37,11 +38,12 @@ class NestControl(Node):
                 self.parent.poly.LOGGER.info(' house_type                     : %s' % structure.house_type)
                 self.parent.poly.LOGGER.info(' hvac_safety_shutoff_enabled    : %s' % structure.hvac_safety_shutoff_enabled)
                 self.parent.poly.LOGGER.info(' num_thermostats                : %s' % structure.num_thermostats)
-                self.parent.poly.LOGGER.info(' measurement_scale              : %s' % structure.measurement_scale)
+##                self.parent.poly.LOGGER.info(' measurement_scale              : %s' % structure.measurement_scale)
                 self.parent.poly.LOGGER.info(' renovation_date                : %s' % structure.renovation_date)
                 self.parent.poly.LOGGER.info(' structure_area                 : %s' % structure.structure_area)
             for device in self.napi.devices:
-                self.parent.poly.LOGGER.info('        Device: %s' % device.serial[-14:])
+              	self.parent.poly.LOGGER.info('=============================================================')
+   		self.parent.poly.LOGGER.info('        Device: %s' % device.serial[-14:])
                 self.parent.poly.LOGGER.info('        Where: %s' % device.where)
                 self.parent.poly.LOGGER.info('            Mode     : %s' % device.mode)
                 self.parent.poly.LOGGER.info('            Fan      : %s' % device.fan)
@@ -64,26 +66,26 @@ class NestControl(Node):
                 self.parent.poly.LOGGER.info('            last_connection       : %s' % device.last_connection)
                 self.parent.poly.LOGGER.info('            error_code            : %s' % device.error_code)
                 self.parent.poly.LOGGER.info('            battery_level         : %s' % device.battery_level)
-                # ISY only allows 14 character limit on nodes, have to strip the serial number down to the last 14 chars. 
+                # ISY only allows 14 character limit on nodes, have to strip the serial number down to the last 14 chars.
                 address = device.serial[-14:].lower()
                 lnode = self.parent.get_node(address)
                 if not lnode:
                     self.parent.poly.LOGGER.info("New Thermostat Found.")
-                    self.parent.thermostats.append(NestThermostat(self.parent, self.parent.get_node('nestcontrol'), 
+                    self.parent.thermostats.append(NestThermostat(self.parent, self.parent.get_node('nestcontrol'),
                                                                       address, device.temperature, structure.name,  device.where, manifest))
             self.parent.update_config()
         except requests.exceptions.HTTPError as e:
-            self.LOGGER.error('Nestcontrol _discover Caught exception: %s', e)            
+            self.LOGGER.error('Nestcontrol _discover Caught exception: %s', e)
         return True
 
     _drivers = {}
 
     _commands = {'DISCOVER': _discover}
-    
+
     node_def_id = 'nestcontrol'
 
 class NestThermostat(Node):
-    
+
     def __init__(self, parent, primary, address, temperature, structurename, location, manifest=None):
         self.parent = parent
         self.LOGGER = self.parent.poly.LOGGER
@@ -93,7 +95,7 @@ class NestThermostat(Node):
             self.LOGGER.info('Initializing New Thermostat')
             self.napi = nest.Nest(USERNAME,PASSWORD, local_time=True)
         except requests.exceptions.HTTPError as e:
-            self.LOGGER.error('NestThermostat __init__ Caught exception: %s', e)            
+            self.LOGGER.error('NestThermostat __init__ Caught exception: %s', e)
         self.away = False
         self.online = False
         self.insidetemp = nest_utils.c_to_f(temperature)
@@ -106,7 +108,7 @@ class NestThermostat(Node):
         self.LOGGER.info("Adding new Nest Device: %s Current Temp: %i F", self.name, self.insidetemp)
         super(NestThermostat, self).__init__(parent, address, self.name, primary, manifest)
         self.update_info()
-        
+
     def update_info(self):
         self.away = False
         try:
@@ -118,7 +120,7 @@ class NestThermostat(Node):
                         self.away = True
                     self.LOGGER.info('Us: %s Them: %s', self.away, structure.away)
             for device in self.napi.devices:
-                if self.address == device.serial[-14:].lower():
+    	        if self.address == device.serial[-14:].lower():
                     self.mode = device.mode
                     if device.fan:
                         self.set_driver('CLIFS', '7')
@@ -137,35 +139,34 @@ class NestThermostat(Node):
                     if self.mode == 'range':
                         self.targetlow = int(round(nest_utils.c_to_f(device.target[0])))
                         self.targethigh = int(round(nest_utils.c_to_f(device.target[1])))
-                        self.LOGGER.info("Target Temp is a range between %i F and %i F", 
+                        self.LOGGER.info("Target Temp is a range between %i F and %i F",
                                                self.targetlow, self.targethigh)
                     else:
                         self.targetlow = int(round(nest_utils.c_to_f(device.target)))
                         self.LOGGER.info('Target Temp is %i F', self.targetlow)
                         self.targethigh = self.targetlow
-
-                        # TODO, clean this up into a dictionary or something clever.
-                self.LOGGER.info("Away %s: Mode: %s InsideTemp: %i F OutsideTemp: %i F TargetLow: %i F TargetHigh: %i F", 
-                                               self.away, self.mode, self.insidetemp, self.outsidetemp, self.targetlow, self.targethigh)
-                if self.away:
-                    self.set_driver('CLIMD', '13') 
-                elif self.mode == 'range':
-                    self.set_driver('CLIMD', '3')
-                elif self.mode == 'heat':
-                    self.set_driver('CLIMD', '1')
-                elif self.mode == 'cool':
-                    self.set_driver('CLIMD', '2')
-                elif self.mode == 'fan':
-                    self.set_driver('CLIMD', '6')
-                else:
-                    self.set_driver('CLIMD', '0')
-                self.set_driver('ST', int(self.insidetemp))
-                self.set_driver('CLISPC', self.targethigh)
-                self.set_driver('CLISPH', self.targetlow)
-                self.set_driver('CLIHUM', self.humidity)
-                self.set_driver('CLIHCS', self.state)
-                self.set_driver('GV2', self.outsidetemp)
-                self.set_driver('GV4', self.online)
+                    # TODO, clean this up into a dictionary or something clever.
+                    self.LOGGER.info("Away %s: Mode: %s InsideTemp: %i F OutsideTemp: %i F TargetLow: %i F TargetHigh: %i F",
+                                    self.away, self.mode, self.insidetemp, self.outsidetemp, self.targetlow, self.targethigh)
+                    if self.away:
+                    	self.set_driver('CLIMD', '13')
+                    elif self.mode == 'range':
+                    	self.set_driver('CLIMD', '3')
+                    elif self.mode == 'heat':
+                    	self.set_driver('CLIMD', '1')
+                    elif self.mode == 'cool':
+                    	self.set_driver('CLIMD', '2')
+                    elif self.mode == 'fan':
+                    	self.set_driver('CLIMD', '6')
+                    else:
+                	    self.set_driver('CLIMD', '0')
+                    self.set_driver('ST', int(self.insidetemp))
+                    self.set_driver('CLISPC', self.targethigh)
+                    self.set_driver('CLISPH', self.targetlow)
+                    self.set_driver('CLIHUM', self.humidity)
+                    self.set_driver('CLIHCS', self.state)
+                    self.set_driver('GV2', self.outsidetemp)
+                    self.set_driver('GV4', self.online)
         except requests.exceptions.HTTPError as e:
             self.LOGGER.error('NestThermostat update_info Caught exception: %s', e)
         return
@@ -173,16 +174,16 @@ class NestThermostat(Node):
     def _setoff(self, **kwargs):
         try:
             for device in self.napi.devices:
-                if self.address == device.serial[-14:].lower():       
+                if self.address == device.serial[-14:].lower():
                     device.mode = 'off'
         except requests.exceptions.HTTPError as e:
             self.LOGGER.error('NestThermostat _setoff Caught exception: %s', e)
-        return True        
+        return True
 
     def _setauto(self, **kwargs):
         try:
             for device in self.napi.devices:
-                if self.address == device.serial[-14:].lower():       
+                if self.address == device.serial[-14:].lower():
                     device.mode = 'range'
         except requests.exceptions.HTTPError as e:
             self.LOGGER.error('NestThermostat _setauto Caught exception: %s', e)
@@ -200,7 +201,7 @@ class NestThermostat(Node):
             self._checkconnect()
             newstate = NEST_STATES[int(val)]
             self.LOGGER.info('Got mode change request from ISY. Setting Nest to: %s', newstate)
-            if newstate == 'away':  
+            if newstate == 'away':
                 for structure in self.napi.structures:
                     if self.structurename == structure.name:
                         structure.away = True
@@ -210,7 +211,7 @@ class NestThermostat(Node):
                         structure.away = False
                         self.away = False
                 for device in self.napi.devices:
-                    if self.address == device.serial[-14:].lower():       
+                    if self.address == device.serial[-14:].lower():
                         device.mode = newstate
             self.set_driver('CLIMD', int(val))
             #self.update_info()
@@ -230,7 +231,7 @@ class NestThermostat(Node):
                     else:
                         device.fan = False
                         self.LOGGER.info('Got Set Fan command. Setting fan to \'Auto\'')
-                    self.set_driver('CLIFS', val)
+		self.set_driver('CLIFS', val)
         except requests.exceptions.HTTPError as e:
             self.LOGGER.error('NestThermostat _settemp Caught exception: %s', e)
         return True
@@ -320,5 +321,5 @@ class NestThermostat(Node):
                             'CLISPH': _setlow,
                             'CLISPC': _sethigh,
                             'QUERY': query}
-                            
+
     node_def_id = 'nestthermostat'
